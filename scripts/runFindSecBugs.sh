@@ -4,7 +4,7 @@ source scripts/requireCommand.sh
 requireCommand docker
 
 # The owasp project must be compiled since findsecbugs works with .war archives
-mvn compile
+mvn install
 
 benchmark_version=$(scripts/getBenchmarkVersion.sh)
 findsecbugs_version=1.13.0
