@@ -13,3 +13,4 @@ bearer_version=$(docker run --platform linux/amd64 bearer/bearer bearer --versio
 result_file="/src/results/Benchmark_$benchmark_version-Bearer-v$bearer_version.json"
 
 docker run --platform linux/amd64 --rm -v "${PWD}:/src" bearer/bearer scan /src/src/main/ --format jsonv2 --output "$result_file" > /dev/null
+docker run --rm -v "${PWD}:/src" ubuntu sh -c "chown $(id -u $USER):$(id -g $USER) -R /src"

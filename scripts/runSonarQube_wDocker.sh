@@ -14,6 +14,9 @@ requireCommand docker
 requireCommand jq
 
 # Check for install/updates at https://github.com/SonarSource/sonarqube
+# Check for install/updates at https://github.com/SonarSource/sonarqube
+# This is Page size, If facing JQ Errors due to Long Arguments, Decrease this Number. Tested with SonarQube 9.9 LTS, 50 and 100 where producing lots of errors,
+elements_per_request=20
 
 sonar_port="9876"
 sonar_host="http://localhost:$sonar_port"
@@ -76,39 +79,70 @@ result_file="results/Benchmark_$benchmark_version-sonarqube-v$sonarqube_version.
 result='{"issues":[], "hotspots": []}'
 rules='[]'
 
-# sonarqube does not allow us to grab more than 10k issues, but most of them are information exposure which is not even
-# considered by benchmark so let's just get all relevant rules and receive results for only those rules
 
-rules_count=$(curl --silent -u "$sonar_token:" "$sonar_host/api/rules/search?p=1&ps=1" | jq -r '.total')
+## WE ARE GOING TO DISCARD RULE CHERRY PICKING. SO ALL RESULTS ARE REPORTED REGARDLESS SO THAT BENCHMARK CAN POPULATE RESULTS & SCORE ACCORDINGLY.
+## The content/data structure returned is controled by SONARQUEBE end server, Benchmark Script picks them accordingly and match them back to test cases and create the score. 
+## If returned data are not structured in a way expected by Benchmark/Score calculator. Example: CWE/DataPoint missed then results will not be counted/scored. This can end up in in-correct/Lower Score calculation. 
+## rules_count=$(curl --silent -u "$sonar_token:" "$sonar_host/api/rules/search?p=1&ps=1" | jq -r '.total')
+##page=1
+##echo "rule count is: $rules_count"
+
+## while (((page - 1) * elements_per_request < rules_count)); do
+##  rules=$(echo "$rules" | jq ". += $(curl --silent -u "$sonar_token:" "$sonar_host/api/rules/search?p=$page&ps=$elements_per_request" | jq '.rules | map( .key ) | map( select(. | contains("java:") ) )')")
+##  page=$((page+1))
+##  echo "rule page: $page"
+##  sleep 1;
+## done
+## rules=$(echo "$rules" | jq '. | join(",")' | sed 's/java:S1989,//')
+
+issues_count=$(curl --silent -u "$sonar_token:" "$sonar_host/api/issues/search?p=1&ps=1&types=VULNERABILITY&componentKeys=$sonar_project" | jq -r '.paging.total')
 page=1
 
-while (((page - 1) * 500 < rules_count)); do
-  rules=$(echo "$rules" | jq ". += $(curl --silent -u "$sonar_token:" "$sonar_host/api/rules/search?p=$page&ps=500" | jq '.rules | map( .key ) | map( select(. | contains("java:") ) )')")
-  page=$((page+1))
+echo "Vulnerability Issue count is: $issues_count"
+
+## We are using two files to write results to. One as buffer the other as final to incrementally add results and swap in-between.
+## This helps to have some sort of fault tolerance. If jq hits long argument or sonarqube sends back impaired data/empty for a single page, previous progress of result collection will not be erased/lost retroactively.
+echo '{"issues":[], "hotspots": []}' > buffdump.json;
+echo '{"issues":[], "hotspots": []}' > resdump.json;
+
+while (((page - 1) * elements_per_request < issues_count)); do
+ cat resdump.json > buffdump.json;
+ itemcount=$(($page * $elements_per_request))
+ echo "processing Vulnerablity issues, page: $page up to $itemcount items out of total $issues_count"
+ issues_page=$(curl --silent -u "$sonar_token:" "$sonar_host/api/issues/search?types=VULNERABILITY&p=$page&ps=$elements_per_request&componentKeys=$sonar_project" | jq '.issues')
+ if [ "$issues_page" ]; then
+   cat buffdump.json | jq ".issues += ${issues_page}" > resdump.json;
+ else
+   echo "Empty. Error reading Vulnerability issues at Page:$page !"
+ fi
+ page=$((page+1))
 done
 
-rules=$(echo "$rules" | jq '. | join(",")' | sed 's/java:S1989,//')
-
-issues_count=$(curl --silent -u "$sonar_token:" "$sonar_host/api/issues/search?p=1&ps=1&types=VULNERABILITY&componentKeys=$sonar_project&rules=$rules" | jq -r '.paging.total')
+hotspot_count=$(curl --silent -u "$sonar_token:" "$sonar_host/api/hotspots/search?projectKey=$sonar_project&p=1&ps=1" | jq -r '.paging.total')
 page=1
+echo "Hotspot Count is: $hotspot_count"
 
-while (((page - 1) * 500 < issues_count)); do
-  issues_page=$(curl --silent -u "$sonar_token:" "$sonar_host/api/issues/search?types=VULNERABILITY&p=$page&ps=500&componentKeys=$sonar_project&rules=$rules" | jq '.issues')
-
-  result=$(echo "$result" | jq ".issues += $issues_page")
+cat resdump.json > buffdump.json
+while (((page - 1) * elements_per_request < hotspot_count)); do
+  cat resdump.json > buffdump.json
+  itemcount=$(($page * $elements_per_request))
+  echo "processing Hotspots, page: $page up to $itemcount items out of total $hotspot_count"
+  hotspot_page=$(curl --silent -u "$sonar_token:" "$sonar_host/api/hotspots/search?projectKey=$sonar_project&p=$page&ps=$elements_per_request" | jq '.hotspots')
+  if [ "$hotspot_page" ]; then
+    cat buffdump.json | jq ".hotspots += ${hotspot_page}" > resdump.json;
+  else
+    echo "Empty. Error reading Hotspot at Page:$page !"
+  fi
   page=$((page+1))
 done
-
-hotspot_count=$(curl --silent -u "$sonar_token:" "$sonar_host/api/hotspots/search?projectKey=benchmark&p=1&ps=1" | jq -r '.paging.total')
-page=1
-
-while (((page - 1) * 500 < hotspot_count)); do
-  result=$(echo "$result" | jq ".hotspots += $(curl --silent -u "$sonar_token:" "$sonar_host/api/hotspots/search?projectKey=$sonar_project&p=$page&ps=500" | jq '.hotspots')")
-  page=$((page+1))
-done
-
-echo "$result" > "$result_file"
+echo "Writing end results json content";
+cp resdump.json "${result_file}";
+echo "Done, please go ahead an generate the scorecard";
+## cleanup the two files generated to record results, if want them for debug, you can comment the following line
+rm resdump.json buffdump.json;
 
 echo "Shutting down SonarQube"
 
 docker stop "$container_id"
+
+docker run --rm -v "${PWD}:/src" ubuntu sh -c "chown $(id -u $USER):$(id -g $USER) -R /src"

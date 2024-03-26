@@ -11,3 +11,5 @@ findsecbugs_version=1.13.0
 result_file="/src/results/Benchmark_$benchmark_version-FindSecBugs-v$findsecbugs_version.xml"
 
 docker run --rm -v $(pwd):/src ocelaiwo/findsecbugs:1.13.0 sh -c "/findsecbugs-cli-1.13.0/findsecbugs.sh -xml /src/target/benchmark.war > $result_file"
+
+docker run --rm -v "${PWD}:/src" ubuntu sh -c "chown $(id -u $USER):$(id -g $USER) -R /src"
