@@ -2,6 +2,11 @@ name: SAST
 
 on: [push]
 
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
 jobs:
   build:
 
