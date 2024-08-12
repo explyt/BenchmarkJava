@@ -12,7 +12,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: RUN SAST
-        uses: explyt/sast-action
+        uses: explyt/sast-action@main
         with:
           projectRoot: ${{github.workspace}}
 
